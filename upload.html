@@ -1,88 +1,66 @@
 <!DOCTYPE html>
 <html>
-<head>
-<meta charset="utf-8">
-<title>R2 Multipart Uploader</title>
-<style>
-body{background:#0d1117;color:#fff;font-family:sans-serif}
-.box{max-width:500px;margin:60px auto;padding:25px;background:#161b22;border-radius:12px}
-button{padding:10px 15px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer}
-progress{width:100%;height:20px}
-</style>
-</head>
-<body>
+<body style="background:#111;color:#fff;font-family:sans-serif">
 
-<div class="box">
-<h2>Upload to R2 (Multipart)</h2>
+<h2>R2 Multipart Upload</h2>
 
-<input type="file" id="file"><br><br>
-<button onclick="startUpload()">Upload</button>
+<input type="file" id="file">
+<button onclick="upload()">Upload</button>
 
 <br><br>
-<progress id="progress" value="0" max="100"></progress>
-<div id="status"></div>
-</div>
+<progress id="p" value="0" max="100" style="width:300px"></progress>
+<div id="s"></div>
 
 <script>
-const API = "https://r2-uploat.trinhhoan00365.workers.dev"; // <-- giữ nguyên hoặc đổi nếu cần
-const CHUNK_SIZE = 5 * 1024 * 1024;
+const API = "https://r2-uploat.trinhhoan00365.workers.dev";
+const CHUNK = 5 * 1024 * 1024;
 
-async function startUpload(){
-  const file = document.getElementById("file").files[0];
-  if(!file) return alert("Chọn file");
+async function upload() {
+  const f = document.getElementById("file").files[0];
+  if (!f) return alert("Chọn file");
 
-  const filename = Date.now()+"-"+file.name;
-  document.getElementById("status").innerText = "Khởi tạo upload...";
+  const name = Date.now() + "-" + f.name;
 
-  const init = await fetch(API+"?action=init",{
+  const init = await fetch(API+"?action=init", {
     method:"POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({filename})
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ filename: name })
   }).then(r=>r.json());
 
-  const parts = [];
-  let uploaded = 0;
-  let partNumber = 1;
+  let parts = [];
+  let part = 1;
+  let sent = 0;
 
-  for(let start=0; start<file.size; start+=CHUNK_SIZE){
-    const chunk = file.slice(start,start+CHUNK_SIZE);
+  for (let i=0;i<f.size;i+=CHUNK) {
+    const blob = f.slice(i, i+CHUNK);
 
-    document.getElementById("status").innerText =
-      `Uploading part ${partNumber}/${Math.ceil(file.size/CHUNK_SIZE)}`;
+    const r = await fetch(`${API}?action=part&key=${encodeURIComponent(name)}&uploadId=${init.uploadId}&part=${part}`, {
+      method:"POST",
+      body: blob
+    }).then(r=>r.json());
 
-    const res = await fetch(
-      `${API}?action=part&key=${encodeURIComponent(filename)}&uploadId=${init.uploadId}&part=${partNumber}`,
-      { method:"POST", body: chunk }
-    ).then(r=>r.json());
+    parts.push({ partNumber: part, etag: r.etag });
 
-    parts.push({ partNumber: partNumber, etag: res.etag });
-
-    uploaded += chunk.size;
-    partNumber++;
-
-    document.getElementById("progress").value = uploaded/file.size*100;
+    sent += blob.size;
+    document.getElementById("p").value = sent/f.size*100;
+    part++;
   }
 
-  document.getElementById("status").innerText = "Hoàn tất...";
+  parts.sort((a,b)=>a.partNumber-b.partNumber);
 
-  // ===== FIX CHỖ LỖI Ở ĐÂY =====
-  await fetch(API+"?action=complete",{
+  const done = await fetch(API+"?action=complete", {
     method:"POST",
-    headers: { "Content-Type": "application/json" },
+    headers:{ "Content-Type":"application/json" },
     body: JSON.stringify({
-      key: filename,
+      key: name,
       uploadId: init.uploadId,
-      parts: parts.sort((a,b)=>a.partNumber-b.partNumber)
+      parts: parts
     })
-  });
+  }).then(r=>r.text());
 
-  document.getElementById("status").innerHTML =
-    "✅ Upload thành công:<br>"+filename;
+  document.getElementById("s").innerText = done;
 }
 </script>
 
 </body>
 </html>
-
-
-
