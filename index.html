@@ -2,47 +2,59 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<title>R2 Chunk Upload</title>
+<title>R2 Manager</title>
 <style>
-body{background:#0b1220;color:#fff;font-family:sans-serif}
-.box{max-width:700px;margin:40px auto;background:#111c33;padding:20px;border-radius:10px}
-.progress{height:12px;background:#333;border-radius:6px;overflow:hidden;margin-top:10px}
+body{margin:0;background:#0b1220;font-family:system-ui;color:#fff}
+.container{max-width:900px;margin:40px auto;background:#111c33;padding:20px;border-radius:10px}
+h2{color:#4cc9f0}
+input,button{padding:8px;border-radius:5px;border:none}
+button{background:#2563eb;color:#fff;cursor:pointer}
+table{width:100%;margin-top:15px;border-collapse:collapse}
+td,th{padding:8px;border-bottom:1px solid #333}
+.hidden{display:none}
+.progress{height:10px;background:#1f2937;border-radius:5px;margin-top:10px;overflow:hidden}
 .bar{height:100%;width:0;background:#22c55e}
-table{width:100%;margin-top:15px}
 </style>
 </head>
 <body>
 
-<div class="box" id="loginBox">
+<div class="container" id="loginBox">
   <h2>Login</h2>
-  <input id="user" placeholder="user"><br><br>
-  <input id="pass" type="password" placeholder="pass"><br><br>
+  <input id="user" placeholder="User"><br><br>
+  <input id="pass" type="password" placeholder="Password"><br><br>
   <button onclick="login()">Login</button>
 </div>
 
-<div class="box" id="app" style="display:none">
-  <h2>Chunk Upload R2</h2>
+<div class="container hidden" id="app">
+  <h2>R2 Manager (Multipart Upload)</h2>
 
   <input type="file" id="file">
   <button onclick="upload()">Upload</button>
 
   <div class="progress"><div class="bar" id="bar"></div></div>
 
-  <table id="files"></table>
+  <table>
+    <thead>
+      <tr><th>File</th><th>Size</th></tr>
+    </thead>
+    <tbody id="files"></tbody>
+  </table>
 </div>
 
 <script>
-const WORKER = "https://upfile4.trinhhoan00365.workers.dev";
+const WORKER = "https://upfile4.trinhhoan00365.workers.dev"; // 🔴 SỬA DOMAIN WORKER
 let TOKEN = "ok";
 
 function login(){
-  fetch(WORKER+"/api/login",{method:"POST",body:JSON.stringify({user:user.value,pass:pass.value})})
-  .then(r=>r.json()).then(d=>{
+  fetch(WORKER+"/api/login",{
+    method:"POST",
+    body:JSON.stringify({user:user.value,pass:pass.value})
+  }).then(r=>r.json()).then(d=>{
     if(d.ok){
-      loginBox.style.display="none";
-      app.style.display="block";
+      loginBox.classList.add("hidden");
+      app.classList.remove("hidden");
       loadFiles();
-    } else alert("Sai");
+    } else alert("Sai tài khoản");
   });
 }
 
@@ -50,47 +62,70 @@ async function upload(){
   const f = file.files[0];
   if(!f) return alert("Chọn file");
 
-  const chunkSize = 5 * 1024 * 1024;
+  // init multipart
+  const initRes = await fetch(WORKER+"/api/init-upload",{
+    method:"POST",
+    headers:{Authorization:TOKEN},
+    body:JSON.stringify({fileName:f.name})
+  });
+  const init = await initRes.json();
+
+  const uploadId = init.uploadId;
+  const key = init.key;
+
+  const chunkSize = 5 * 1024 * 1024; // 5MB
   const totalParts = Math.ceil(f.size / chunkSize);
-  const uploadId = crypto.randomUUID();
+
+  const parts = [];
 
   for(let i=0;i<totalParts;i++){
     const chunk = f.slice(i*chunkSize,(i+1)*chunkSize);
 
-    await fetch(WORKER+"/api/upload-chunk",{
+    const r = await fetch(WORKER+"/api/upload-part",{
       method:"POST",
       headers:{
-        "Authorization":"ok",
+        Authorization:TOKEN,
         "X-Upload-Id":uploadId,
-        "X-Part":i
+        "X-Key":key,
+        "X-Part": i+1
       },
       body:chunk
     });
+
+    const d = await r.json();
+    parts.push({ partNumber: i+1, etag: d.etag });
 
     const percent = Math.floor(((i+1)/totalParts)*100);
     bar.style.width = percent+"%";
   }
 
-  await fetch(WORKER+"/api/complete",{
+  // complete upload
+  await fetch(WORKER+"/api/complete-upload",{
     method:"POST",
-    headers:{Authorization:"ok"},
-    body:JSON.stringify({uploadId,fileName:f.name,totalParts})
+    headers:{Authorization:TOKEN},
+    body:JSON.stringify({key, uploadId, parts})
   });
 
   bar.style.width="0%";
-  alert("Upload xong!");
+  alert("Upload thành công!");
   loadFiles();
 }
 
 function loadFiles(){
-  fetch(WORKER+"/api/files",{headers:{Authorization:"ok"}})
+  fetch(WORKER+"/api/files",{headers:{Authorization:TOKEN}})
   .then(r=>r.json()).then(list=>{
-    files.innerHTML="<tr><th>File</th><th>Size(MB)</th></tr>";
+    const tb=document.getElementById("files");
+    tb.innerHTML="";
     list.forEach(f=>{
-      files.innerHTML+=`<tr><td>${f.key}</td><td>${(f.size/1024/1024).toFixed(2)}</td></tr>`;
+      tb.innerHTML+=`
+        <tr>
+          <td>${f.key}</td>
+          <td>${(f.size/1024/1024).toFixed(2)} MB</td>
+        </tr>`;
     });
   });
 }
 </script>
+
 </body>
 </html>
