@@ -1,88 +1,75 @@
 <!DOCTYPE html>
 <html>
-<body style="background:#111;color:#fff;font-family:sans-serif">
+<head>
+<meta charset="utf-8">
+<title>R2 Direct Upload</title>
+<style>
+body{background:#111;color:#fff;font-family:sans-serif}
+.box{max-width:500px;margin:50px auto;padding:20px;background:#1a1a1a;border-radius:10px}
+progress{width:100%}
+</style>
+</head>
+<body>
 
-<h2>R2 Multipart Upload</h2>
+<div class="box">
+<h2>Upload to R2 (Direct)</h2>
 
 <input type="file" id="file">
 <button onclick="upload()">Upload</button>
 
 <br><br>
-<progress id="p" value="0" max="100" style="width:300px"></progress>
+<progress id="p" value="0" max="100"></progress>
 <div id="s"></div>
+</div>
 
-  <script>
-const API = "https://r2-uploat.trinhhoan00365.workers.dev";
-const CHUNK = 5 * 1024 * 1024;
+<script src="https://unpkg.com/@aws-sdk/client-s3@3.470.0/dist/aws-sdk-client-s3.min.js"></script>
+
+<script>
+const {
+  S3Client,
+  PutObjectCommand
+} = window.AWS_SDK_CLIENT_S3;
+
+// ====== ĐIỀN THÔNG TIN CỦA BẠN ======
+const ACCOUNT_ID = "f0cbfef63d7578a685f24d12e42c1143";
+const ACCESS_KEY = "acffa193c2c871dbe4b47f49582019dd";
+const SECRET_KEY = "0977f661664eec3284ae035978e5fcde45466b72a40afa5beadfe27672650efd";
+const BUCKET = "videos"; // bucket name
+// ==================================
+
+const client = new S3Client({
+  region: "auto",
+  endpoint: `https://${ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: ACCESS_KEY,
+    secretAccessKey: SECRET_KEY
+  }
+});
 
 async function upload() {
-  const f = document.getElementById("file").files[0];
-  if (!f) return alert("Chọn file");
+  const file = document.getElementById("file").files[0];
+  if (!file) return alert("Chọn file");
 
-  const name = Date.now() + "-" + f.name;
+  const key = Date.now() + "-" + file.name;
 
-  // INIT
-  const init = await fetch(API+"?action=init", {
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({ filename: name })
-  }).then(r=>r.json());
+  document.getElementById("s").innerText = "Uploading...";
 
-  const uploadId = init.uploadId;
-  const parts = [];
-
-  let partNumber = 1;
-  let sent = 0;
-
-  for (let i=0; i<f.size; i+=CHUNK) {
-    const blob = f.slice(i, i+CHUNK);
-
-    const res = await fetch(
-      `${API}?action=part&key=${encodeURIComponent(name)}&uploadId=${uploadId}&part=${partNumber}`,
-      { method:"POST", body: blob }
-    );
-
-    if (!res.ok) {
-      throw new Error("Upload part failed: " + partNumber);
-    }
-
-    const data = await res.json();
-
-    if (!data.etag) {
-      throw new Error("Missing etag at part " + partNumber);
-    }
-
-    parts.push({
-      partNumber: partNumber,
-      etag: data.etag
-    });
-
-    sent += blob.size;
-    document.getElementById("p").value = sent / f.size * 100;
-
-    partNumber++;
-  }
-
-  // sort lại chắc chắn
-  parts.sort((a,b)=>a.partNumber-b.partNumber);
-
-  // COMPLETE
-  const completeRes = await fetch(API+"?action=complete", {
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({
-      key: name,
-      uploadId: uploadId,
-      parts: parts
-    })
+  const cmd = new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+    Body: file,
+    ContentType: file.type
   });
 
-  const txt = await completeRes.text();
-  document.getElementById("s").innerText = txt;
+  try {
+    await client.send(cmd);
+    document.getElementById("s").innerText = "✅ Upload thành công: " + key;
+    document.getElementById("p").value = 100;
+  } catch (e) {
+    document.getElementById("s").innerText = "❌ Lỗi: " + e.message;
+  }
 }
 </script>
 
-
 </body>
 </html>
-
