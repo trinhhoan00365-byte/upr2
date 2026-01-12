@@ -32,7 +32,7 @@ function upload(){
   form.append("file", file);
 
   const xhr = new XMLHttpRequest();
-  xhr.open("POST", "https://r2-uploat.trinhhoan00365.workers.dev/");
+  xhr.open("POST", "https://r2-uploat.trinhhoan00365.workers.dev");
 
   xhr.upload.onprogress = e => {
     if(e.lengthComputable){
@@ -54,3 +54,4 @@ function upload(){
 
 </body>
 </html>
+
