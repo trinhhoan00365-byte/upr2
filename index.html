@@ -1,128 +1,80 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html>
 <head>
-<meta charset="UTF-8">
-<title>R2 Manager – Presigned Multipart</title>
+<meta charset="utf-8">
+<title>R2 Large Upload</title>
 <style>
-body{margin:0;background:#0b1220;font-family:system-ui;color:#fff}
-.container{max-width:900px;margin:40px auto;background:#111c33;padding:20px;border-radius:10px}
-h2{color:#4cc9f0}
-input,button{padding:8px;border-radius:5px;border:none}
-button{background:#2563eb;color:#fff;cursor:pointer}
-.progress{height:10px;background:#1f2937;border-radius:5px;margin-top:10px;overflow:hidden}
-.bar{height:100%;width:0;background:#22c55e}
-table{width:100%;margin-top:15px;border-collapse:collapse}
-td,th{padding:8px;border-bottom:1px solid #333}
-.hidden{display:none}
+body { font-family: sans-serif; background:#0f172a; color:white; padding:30px }
+.box { border:2px dashed #3b82f6; padding:40px; text-align:center }
+progress { width:100%; height:20px }
 </style>
 </head>
 <body>
 
-<div class="container" id="loginBox">
-  <h2>Login</h2>
-  <input id="user" placeholder="User"><br><br>
-  <input id="pass" type="password" placeholder="Password"><br><br>
-  <button onclick="login()">Login</button>
+<h2>Upload file lớn lên R2</h2>
+
+<div class="box">
+<input type="file" id="file"><br><br>
+<button onclick="startUpload()">Upload</button>
 </div>
 
-<div class="container hidden" id="app">
-  <h2>R2 Manager – Presigned Multipart</h2>
-
-  <input type="file" id="file">
-  <button onclick="upload()">Upload</button>
-
-  <div class="progress"><div class="bar" id="bar"></div></div>
-
-  <table>
-    <thead><tr><th>File</th><th>Size</th></tr></thead>
-    <tbody id="files"></tbody>
-  </table>
-</div>
+<br>
+<progress id="prog" value="0" max="100"></progress>
+<div id="status"></div>
 
 <script>
-const WORKER = "https://upfile4.trinhhoan00365.workers.dev"; // 🔴 đổi
-const TOKEN = "ok";
+const WORKER_URL = "https://upfile4.trinhhoan00365.workers.dev";
 
-function login(){
-  fetch(WORKER+"/api/login",{
-    method:"POST",
-    body:JSON.stringify({user:user.value,pass:pass.value})
-  }).then(r=>r.json()).then(d=>{
-    if(d.ok){
-      loginBox.classList.add("hidden");
-      app.classList.remove("hidden");
-      loadFiles();
-    } else alert("Sai tài khoản");
-  });
-}
+const CHUNK_SIZE = 5 * 1024 * 1024;
 
-async function upload(){
-  const f = file.files[0];
-  if(!f) return alert("Chọn file");
+async function startUpload() {
+  const file = document.getElementById("file").files[0];
+  if (!file) return alert("Chọn file");
 
-  // init
-  const initRes = await fetch(WORKER+"/api/init",{
-    method:"POST",
-    headers:{Authorization:TOKEN},
-    body:JSON.stringify({fileName:f.name})
-  });
-  const init = await initRes.json();
+  const init = await fetch(WORKER_URL + "/upload/init", {
+    method: "POST",
+    body: JSON.stringify({
+      fileName: file.name,
+      contentType: file.type
+    })
+  }).then(r => r.json());
 
-  const key = init.key;
-  const uploadId = init.uploadId;
-
-  const chunkSize = 10 * 1024 * 1024; // 10MB
-  const totalParts = Math.ceil(f.size / chunkSize);
   const parts = [];
-
+  let partNumber = 1;
   let uploaded = 0;
 
-  for(let i=0;i<totalParts;i++){
-    const chunk = f.slice(i*chunkSize,(i+1)*chunkSize);
+  for (let start = 0; start < file.size; start += CHUNK_SIZE) {
+    const chunk = file.slice(start, start + CHUNK_SIZE);
 
-    // get signed url
-    const signRes = await fetch(WORKER+"/api/sign-part",{
-      method:"POST",
-      headers:{Authorization:TOKEN},
-      body:JSON.stringify({key, uploadId, partNumber:i+1})
-    });
-    const sign = await signRes.json();
+    const res = await fetch(`${WORKER_URL}/upload/part?uploadId=${init.uploadId}&key=${init.key}&partNumber=${partNumber}`, {
+      method: "POST",
+      body: chunk
+    }).then(r => r.json());
 
-    // upload to R2 directly
-    const r = await fetch(sign.url,{method:"PUT",body:chunk});
-    const etag = r.headers.get("ETag");
-
-    parts.push({ partNumber:i+1, etag });
+    parts.push({ partNumber, etag: res.etag });
 
     uploaded += chunk.size;
-    bar.style.width = Math.floor(uploaded / f.size * 100) + "%";
+    updateProgress(uploaded, file.size);
+
+    partNumber++;
   }
 
-  // complete
-  await fetch(WORKER+"/api/complete",{
-    method:"POST",
-    headers:{Authorization:TOKEN},
-    body:JSON.stringify({key, uploadId, parts})
+  await fetch(WORKER_URL + "/upload/complete", {
+    method: "POST",
+    body: JSON.stringify({
+      uploadId: init.uploadId,
+      key: init.key,
+      parts
+    })
   });
 
-  bar.style.width="0%";
-  alert("Upload thành công!");
-  loadFiles();
+  document.getElementById("status").innerText = "✅ Upload thành công!";
 }
 
-function loadFiles(){
-  fetch(WORKER+"/api/files",{headers:{Authorization:TOKEN}})
-  .then(r=>r.json())
-  .then(list=>{
-    files.innerHTML="";
-    list.forEach(f=>{
-      files.innerHTML+=`
-        <tr>
-          <td>${f.key}</td>
-          <td>${(f.size/1024/1024).toFixed(2)} MB</td>
-        </tr>`;
-    });
-  });
+function updateProgress(done, total) {
+  const percent = Math.floor(done / total * 100);
+  document.getElementById("prog").value = percent;
+  document.getElementById("status").innerText = percent + "%";
 }
 </script>
 
