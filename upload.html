@@ -8,7 +8,6 @@ body{background:#0d1117;color:#fff;font-family:sans-serif}
 .box{max-width:500px;margin:60px auto;padding:25px;background:#161b22;border-radius:12px}
 button{padding:10px 15px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer}
 progress{width:100%;height:20px}
-.file{margin-bottom:10px}
 </style>
 </head>
 <body>
@@ -25,8 +24,8 @@ progress{width:100%;height:20px}
 </div>
 
 <script>
-const API = "https://r2-uploat.trinhhoan00365.workers.dev";
-const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+const API = "https://r2-upload.trinhhoan00365.workers.dev"; // <-- giữ nguyên hoặc đổi nếu cần
+const CHUNK_SIZE = 5 * 1024 * 1024;
 
 async function startUpload(){
   const file = document.getElementById("file").files[0];
@@ -37,7 +36,8 @@ async function startUpload(){
 
   const init = await fetch(API+"?action=init",{
     method:"POST",
-    body:JSON.stringify({filename})
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({filename})
   }).then(r=>r.json());
 
   const parts = [];
@@ -48,14 +48,15 @@ async function startUpload(){
     const chunk = file.slice(start,start+CHUNK_SIZE);
 
     document.getElementById("status").innerText =
-      `Uploading part ${partNumber} / ${Math.ceil(file.size/CHUNK_SIZE)}`;
+      `Uploading part ${partNumber}/${Math.ceil(file.size/CHUNK_SIZE)}`;
 
     const res = await fetch(
-      `${API}?action=part&key=${filename}&uploadId=${init.uploadId}&part=${partNumber}`,
-      {method:"POST",body:chunk}
+      `${API}?action=part&key=${encodeURIComponent(filename)}&uploadId=${init.uploadId}&part=${partNumber}`,
+      { method:"POST", body: chunk }
     ).then(r=>r.json());
 
-    parts.push({partNumber,etag:res.etag});
+    parts.push({ partNumber: partNumber, etag: res.etag });
+
     uploaded += chunk.size;
     partNumber++;
 
@@ -64,12 +65,14 @@ async function startUpload(){
 
   document.getElementById("status").innerText = "Hoàn tất...";
 
+  // ===== FIX CHỖ LỖI Ở ĐÂY =====
   await fetch(API+"?action=complete",{
     method:"POST",
-    body:JSON.stringify({
-      key:filename,
-      uploadId:init.uploadId,
-      parts
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      key: filename,
+      uploadId: init.uploadId,
+      parts: parts.sort((a,b)=>a.partNumber-b.partNumber)
     })
   });
 
