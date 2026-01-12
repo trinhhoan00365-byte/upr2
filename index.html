@@ -2,135 +2,95 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<title>R2 Manager</title>
+<title>R2 Chunk Upload</title>
 <style>
-body{margin:0;background:#0b1220;font-family:system-ui;color:#fff}
-.container{max-width:900px;margin:40px auto;background:#111c33;padding:20px;border-radius:10px}
-h2{color:#4cc9f0}
-input,button{padding:8px;border-radius:5px;border:none}
-button{background:#2563eb;color:#fff;cursor:pointer}
-table{width:100%;margin-top:15px;border-collapse:collapse}
-td,th{padding:8px;border-bottom:1px solid #333}
-.hidden{display:none}
-.progress{height:10px;background:#1f2937;border-radius:5px;margin-top:10px;overflow:hidden}
+body{background:#0b1220;color:#fff;font-family:sans-serif}
+.box{max-width:700px;margin:40px auto;background:#111c33;padding:20px;border-radius:10px}
+.progress{height:12px;background:#333;border-radius:6px;overflow:hidden;margin-top:10px}
 .bar{height:100%;width:0;background:#22c55e}
+table{width:100%;margin-top:15px}
 </style>
 </head>
 <body>
 
-<div class="container" id="loginBox">
+<div class="box" id="loginBox">
   <h2>Login</h2>
-  <input id="user" placeholder="User"><br><br>
-  <input id="pass" type="password" placeholder="Password"><br><br>
+  <input id="user" placeholder="user"><br><br>
+  <input id="pass" type="password" placeholder="pass"><br><br>
   <button onclick="login()">Login</button>
 </div>
 
-<div class="container hidden" id="app">
-  <h2>R2 Manager</h2>
+<div class="box" id="app" style="display:none">
+  <h2>Chunk Upload R2</h2>
 
   <input type="file" id="file">
   <button onclick="upload()">Upload</button>
 
   <div class="progress"><div class="bar" id="bar"></div></div>
 
-  <br>
-
-  <input id="folderName" placeholder="Tên thư mục">
-  <button onclick="createFolder()">Tạo thư mục</button>
-
-  <table>
-    <thead>
-      <tr><th>File</th><th>Size</th><th>Action</th></tr>
-    </thead>
-    <tbody id="files"></tbody>
-  </table>
+  <table id="files"></table>
 </div>
 
 <script>
-const WORKER = "https://upfile4.trinhhoan00365.workers.dev"; // <-- SỬA TẠI ĐÂY
-let TOKEN = "";
+const WORKER = "https://upfile4.trinhhoan00365.workers.dev";
+let TOKEN = "ok";
 
 function login(){
-  fetch(WORKER+"/api/login",{
-    method:"POST",
-    body:JSON.stringify({user:user.value,pass:pass.value})
-  }).then(r=>r.json()).then(d=>{
+  fetch(WORKER+"/api/login",{method:"POST",body:JSON.stringify({user:user.value,pass:pass.value})})
+  .then(r=>r.json()).then(d=>{
     if(d.ok){
-      TOKEN="ok";
-      loginBox.classList.add("hidden");
-      app.classList.remove("hidden");
+      loginBox.style.display="none";
+      app.style.display="block";
       loadFiles();
-    } else alert("Sai tài khoản");
+    } else alert("Sai");
   });
 }
 
-function upload(){
+async function upload(){
   const f = file.files[0];
   if(!f) return alert("Chọn file");
 
-  const xhr = new XMLHttpRequest();
-  xhr.open("POST", WORKER+"/api/upload", true);
-  xhr.setRequestHeader("Authorization", TOKEN);
-  xhr.setRequestHeader("X-Filename", f.name);
+  const chunkSize = 5 * 1024 * 1024;
+  const totalParts = Math.ceil(f.size / chunkSize);
+  const uploadId = crypto.randomUUID();
 
-  xhr.upload.onprogress = e=>{
-    if(e.lengthComputable){
-      const p = Math.floor((e.loaded/e.total)*100);
-      document.getElementById("bar").style.width = p+"%";
-    }
-  };
+  for(let i=0;i<totalParts;i++){
+    const chunk = f.slice(i*chunkSize,(i+1)*chunkSize);
 
-  xhr.onload = ()=>{
-    if(xhr.status===200){
-      document.getElementById("bar").style.width="0%";
-      loadFiles();
-      alert("Upload xong!");
-    } else alert("Upload lỗi");
-  };
+    await fetch(WORKER+"/api/upload-chunk",{
+      method:"POST",
+      headers:{
+        "Authorization":"ok",
+        "X-Upload-Id":uploadId,
+        "X-Part":i
+      },
+      body:chunk
+    });
 
-  xhr.send(f);
+    const percent = Math.floor(((i+1)/totalParts)*100);
+    bar.style.width = percent+"%";
+  }
+
+  await fetch(WORKER+"/api/complete",{
+    method:"POST",
+    headers:{Authorization:"ok"},
+    body:JSON.stringify({uploadId,fileName:f.name,totalParts})
+  });
+
+  bar.style.width="0%";
+  alert("Upload xong!");
+  loadFiles();
 }
 
 function loadFiles(){
-  fetch(WORKER+"/api/files",{headers:{Authorization:TOKEN}})
-    .then(r=>r.json())
-    .then(list=>{
-      const tb=document.getElementById("files");
-      tb.innerHTML="";
-      list.forEach(f=>{
-        tb.innerHTML+=`
-        <tr>
-          <td>${f.key}</td>
-          <td>${(f.size/1024/1024).toFixed(2)} MB</td>
-          <td><button onclick="del('${f.key}')">Xóa</button></td>
-        </tr>`;
-      });
+  fetch(WORKER+"/api/files",{headers:{Authorization:"ok"}})
+  .then(r=>r.json()).then(list=>{
+    files.innerHTML="<tr><th>File</th><th>Size(MB)</th></tr>";
+    list.forEach(f=>{
+      files.innerHTML+=`<tr><td>${f.key}</td><td>${(f.size/1024/1024).toFixed(2)}</td></tr>`;
     });
-}
-
-function del(key){
-  if(!confirm("Xóa file?")) return;
-  fetch(WORKER+"/api/delete",{
-    method:"POST",
-    headers:{Authorization:TOKEN},
-    body:JSON.stringify({key})
-  }).then(()=>loadFiles());
-}
-
-function createFolder(){
-  const name = folderName.value.trim();
-  if(!name) return;
-
-  fetch(WORKER+"/api/folder",{
-    method:"POST",
-    headers:{Authorization:TOKEN},
-    body:JSON.stringify({name})
-  }).then(()=>{
-    folderName.value="";
-    loadFiles();
   });
 }
 </script>
-
 </body>
 </html>
