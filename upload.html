@@ -11,7 +11,7 @@
 <progress id="p" value="0" max="100" style="width:300px"></progress>
 <div id="s"></div>
 
-<script>
+  <script>
 const API = "https://r2-uploat.trinhhoan00365.workers.dev";
 const CHUNK = 5 * 1024 * 1024;
 
@@ -21,46 +21,68 @@ async function upload() {
 
   const name = Date.now() + "-" + f.name;
 
+  // INIT
   const init = await fetch(API+"?action=init", {
     method:"POST",
     headers:{ "Content-Type":"application/json" },
     body: JSON.stringify({ filename: name })
   }).then(r=>r.json());
 
-  let parts = [];
-  let part = 1;
+  const uploadId = init.uploadId;
+  const parts = [];
+
+  let partNumber = 1;
   let sent = 0;
 
-  for (let i=0;i<f.size;i+=CHUNK) {
+  for (let i=0; i<f.size; i+=CHUNK) {
     const blob = f.slice(i, i+CHUNK);
 
-    const r = await fetch(`${API}?action=part&key=${encodeURIComponent(name)}&uploadId=${init.uploadId}&part=${part}`, {
-      method:"POST",
-      body: blob
-    }).then(r=>r.json());
+    const res = await fetch(
+      `${API}?action=part&key=${encodeURIComponent(name)}&uploadId=${uploadId}&part=${partNumber}`,
+      { method:"POST", body: blob }
+    );
 
-    parts.push({ partNumber: part, etag: r.etag });
+    if (!res.ok) {
+      throw new Error("Upload part failed: " + partNumber);
+    }
+
+    const data = await res.json();
+
+    if (!data.etag) {
+      throw new Error("Missing etag at part " + partNumber);
+    }
+
+    parts.push({
+      partNumber: partNumber,
+      etag: data.etag
+    });
 
     sent += blob.size;
-    document.getElementById("p").value = sent/f.size*100;
-    part++;
+    document.getElementById("p").value = sent / f.size * 100;
+
+    partNumber++;
   }
 
+  // sort lại chắc chắn
   parts.sort((a,b)=>a.partNumber-b.partNumber);
 
-  const done = await fetch(API+"?action=complete", {
+  // COMPLETE
+  const completeRes = await fetch(API+"?action=complete", {
     method:"POST",
     headers:{ "Content-Type":"application/json" },
     body: JSON.stringify({
       key: name,
-      uploadId: init.uploadId,
+      uploadId: uploadId,
       parts: parts
     })
-  }).then(r=>r.text());
+  });
 
-  document.getElementById("s").innerText = done;
+  const txt = await completeRes.text();
+  document.getElementById("s").innerText = txt;
 }
 </script>
 
+
 </body>
 </html>
+
