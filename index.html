@@ -4,112 +4,131 @@
 <meta charset="UTF-8">
 <title>R2 Manager</title>
 <style>
-body{margin:0;background:#0b1220;font-family:sans-serif;color:#fff}
-.box{max-width:900px;margin:40px auto;background:#111c33;padding:20px;border-radius:10px}
+body{margin:0;background:#0b1220;font-family:system-ui;color:#fff}
+.container{max-width:900px;margin:40px auto;background:#111c33;padding:20px;border-radius:10px}
+h2{color:#4cc9f0}
 input,button{padding:8px;border-radius:5px;border:none}
 button{background:#2563eb;color:#fff;cursor:pointer}
 table{width:100%;margin-top:15px;border-collapse:collapse}
 td,th{padding:8px;border-bottom:1px solid #333}
 .hidden{display:none}
+.progress{height:10px;background:#1f2937;border-radius:5px;margin-top:10px;overflow:hidden}
+.bar{height:100%;width:0;background:#22c55e}
 </style>
 </head>
 <body>
 
-<div class="box" id="loginBox">
+<div class="container" id="loginBox">
   <h2>Login</h2>
   <input id="user" placeholder="User"><br><br>
   <input id="pass" type="password" placeholder="Password"><br><br>
   <button onclick="login()">Login</button>
 </div>
 
-<div class="box hidden" id="app">
+<div class="container hidden" id="app">
   <h2>R2 Manager</h2>
 
   <input type="file" id="file">
   <button onclick="upload()">Upload</button>
 
-  <br><br>
+  <div class="progress"><div class="bar" id="bar"></div></div>
+
+  <br>
 
   <input id="folderName" placeholder="Tên thư mục">
   <button onclick="createFolder()">Tạo thư mục</button>
 
   <table>
-    <thead><tr><th>File</th><th>Size</th><th>Action</th></tr></thead>
+    <thead>
+      <tr><th>File</th><th>Size</th><th>Action</th></tr>
+    </thead>
     <tbody id="files"></tbody>
   </table>
 </div>
 
 <script>
-const WORKER = "https://upfile4.trinhhoan00365.workers.dev";
+const WORKER = "https://upfile4.trinhhoan00365.workers.dev"; // <-- SỬA TẠI ĐÂY
 let TOKEN = "";
 
-function auth() {
-  return { "Authorization": TOKEN };
-}
-
-async function login() {
-  const r = await fetch(WORKER + "/api/login", {
+function login(){
+  fetch(WORKER+"/api/login",{
     method:"POST",
     body:JSON.stringify({user:user.value,pass:pass.value})
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      TOKEN="ok";
+      loginBox.classList.add("hidden");
+      app.classList.remove("hidden");
+      loadFiles();
+    } else alert("Sai tài khoản");
   });
-  const d = await r.json();
-  if(d.ok){
-    TOKEN="ok";
-    loginBox.classList.add("hidden");
-    app.classList.remove("hidden");
-    loadFiles();
-  } else alert("Sai tài khoản");
 }
 
-async function upload() {
+function upload(){
   const f = file.files[0];
   if(!f) return alert("Chọn file");
 
-  const r = await fetch(`${WORKER}/api/upload-url?name=${encodeURIComponent(f.name)}`, {headers:auth()});
-  const d = await r.json();
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", WORKER+"/api/upload", true);
+  xhr.setRequestHeader("Authorization", TOKEN);
+  xhr.setRequestHeader("X-Filename", f.name);
 
-  await fetch(d.uploadUrl,{method:"PUT",body:f});
+  xhr.upload.onprogress = e=>{
+    if(e.lengthComputable){
+      const p = Math.floor((e.loaded/e.total)*100);
+      document.getElementById("bar").style.width = p+"%";
+    }
+  };
 
-  alert("Upload xong");
-  loadFiles();
+  xhr.onload = ()=>{
+    if(xhr.status===200){
+      document.getElementById("bar").style.width="0%";
+      loadFiles();
+      alert("Upload xong!");
+    } else alert("Upload lỗi");
+  };
+
+  xhr.send(f);
 }
 
-async function loadFiles() {
-  const r = await fetch(WORKER+"/api/files",{headers:auth()});
-  const list = await r.json();
-  const tb = document.getElementById("files");
-  tb.innerHTML="";
-  list.forEach(f=>{
-    tb.innerHTML += `<tr>
-      <td>${f.key}</td>
-      <td>${(f.size/1024/1024).toFixed(2)} MB</td>
-      <td><button onclick="del('${f.key}')">Xóa</button></td>
-    </tr>`;
-  });
+function loadFiles(){
+  fetch(WORKER+"/api/files",{headers:{Authorization:TOKEN}})
+    .then(r=>r.json())
+    .then(list=>{
+      const tb=document.getElementById("files");
+      tb.innerHTML="";
+      list.forEach(f=>{
+        tb.innerHTML+=`
+        <tr>
+          <td>${f.key}</td>
+          <td>${(f.size/1024/1024).toFixed(2)} MB</td>
+          <td><button onclick="del('${f.key}')">Xóa</button></td>
+        </tr>`;
+      });
+    });
 }
 
-async function del(key) {
-  if(!confirm("Xóa?")) return;
-  await fetch(WORKER+"/api/delete",{
+function del(key){
+  if(!confirm("Xóa file?")) return;
+  fetch(WORKER+"/api/delete",{
     method:"POST",
-    headers:auth(),
+    headers:{Authorization:TOKEN},
     body:JSON.stringify({key})
-  });
-  loadFiles();
+  }).then(()=>loadFiles());
 }
 
-async function createFolder() {
-  const name = folderName.value;
+function createFolder(){
+  const name = folderName.value.trim();
   if(!name) return;
 
-  await fetch(WORKER+"/api/folder",{
+  fetch(WORKER+"/api/folder",{
     method:"POST",
-    headers:auth(),
+    headers:{Authorization:TOKEN},
     body:JSON.stringify({name})
+  }).then(()=>{
+    folderName.value="";
+    loadFiles();
   });
-
-  folderName.value="";
-  loadFiles();
 }
 </script>
 
