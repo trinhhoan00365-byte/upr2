@@ -2,103 +2,114 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<title>R2 Upload</title>
+<title>R2 Manager</title>
 <style>
-body{
-  background:#0b1220;
-  font-family:system-ui;
-  color:#fff;
-  display:flex;
-  justify-content:center;
-  padding-top:40px;
-}
-.card{
-  width:420px;
-  background:#0f1b33;
-  border-radius:12px;
-  padding:25px;
-  box-shadow:0 0 20px #000;
-}
-h2{margin-top:0;color:#4cc9f0}
-input,button{
-  width:100%;
-  padding:10px;
-  margin-top:10px;
-  border-radius:6px;
-  border:none;
-}
-button{
-  background:#2563eb;
-  color:#fff;
-  cursor:pointer;
-}
-progress{
-  width:100%;
-  height:18px;
-  margin-top:10px;
-}
-#status{margin-top:8px;font-size:14px;color:#9ca3af}
+body{margin:0;background:#0b1220;font-family:sans-serif;color:#fff}
+.box{max-width:900px;margin:40px auto;background:#111c33;padding:20px;border-radius:10px}
+input,button{padding:8px;border-radius:5px;border:none}
+button{background:#2563eb;color:#fff;cursor:pointer}
+table{width:100%;margin-top:15px;border-collapse:collapse}
+td,th{padding:8px;border-bottom:1px solid #333}
+.hidden{display:none}
 </style>
 </head>
 <body>
 
-<div class="card">
-  <h2>R2 Upload</h2>
+<div class="box" id="loginBox">
+  <h2>Login</h2>
+  <input id="user" placeholder="User"><br><br>
+  <input id="pass" type="password" placeholder="Password"><br><br>
+  <button onclick="login()">Login</button>
+</div>
+
+<div class="box hidden" id="app">
+  <h2>R2 Manager</h2>
 
   <input type="file" id="file">
   <button onclick="upload()">Upload</button>
 
-  <progress id="progress" value="0" max="100"></progress>
-  <div id="status"></div>
+  <br><br>
+
+  <input id="folderName" placeholder="Tên thư mục">
+  <button onclick="createFolder()">Tạo thư mục</button>
+
+  <table>
+    <thead><tr><th>File</th><th>Size</th><th>Action</th></tr></thead>
+    <tbody id="files"></tbody>
+  </table>
 </div>
 
 <script>
-const WORKER_URL = "https://upfile2.trinhhoan00365.workers.dev"; // <-- đổi
+const WORKER = "https://upfile4.trinhhoan00365.workers.dev";
+let TOKEN = "";
 
-async function upload(){
-  const fileInput = document.getElementById("file");
-  const file = fileInput.files[0];
-  if(!file) return alert("Chưa chọn file");
-
-  setStatus("Đang tạo upload URL...");
-
-  const res = await fetch(`${WORKER_URL}/get-upload-url?name=${encodeURIComponent(file.name)}`);
-  const data = await res.json();
-
-  await uploadFile(data.uploadUrl, file);
+function auth() {
+  return { "Authorization": TOKEN };
 }
 
-function uploadFile(url, file){
-  return new Promise((resolve,reject)=>{
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", url, true);
+async function login() {
+  const r = await fetch(WORKER + "/api/login", {
+    method:"POST",
+    body:JSON.stringify({user:user.value,pass:pass.value})
+  });
+  const d = await r.json();
+  if(d.ok){
+    TOKEN="ok";
+    loginBox.classList.add("hidden");
+    app.classList.remove("hidden");
+    loadFiles();
+  } else alert("Sai tài khoản");
+}
 
-    xhr.upload.onprogress = e=>{
-      if(e.lengthComputable){
-        const percent = Math.round(e.loaded / e.total * 100);
-        document.getElementById("progress").value = percent;
-        setStatus(`Đang upload: ${percent}%`);
-      }
-    };
+async function upload() {
+  const f = file.files[0];
+  if(!f) return alert("Chọn file");
 
-    xhr.onload = ()=>{
-      if(xhr.status === 200){
-        setStatus("Upload thành công ✅");
-        resolve();
-      }else{
-        setStatus("Upload lỗi ❌");
-        reject();
-      }
-    };
+  const r = await fetch(`${WORKER}/api/upload-url?name=${encodeURIComponent(f.name)}`, {headers:auth()});
+  const d = await r.json();
 
-    xhr.onerror = ()=>reject();
+  await fetch(d.uploadUrl,{method:"PUT",body:f});
 
-    xhr.send(file);
+  alert("Upload xong");
+  loadFiles();
+}
+
+async function loadFiles() {
+  const r = await fetch(WORKER+"/api/files",{headers:auth()});
+  const list = await r.json();
+  const tb = document.getElementById("files");
+  tb.innerHTML="";
+  list.forEach(f=>{
+    tb.innerHTML += `<tr>
+      <td>${f.key}</td>
+      <td>${(f.size/1024/1024).toFixed(2)} MB</td>
+      <td><button onclick="del('${f.key}')">Xóa</button></td>
+    </tr>`;
   });
 }
 
-function setStatus(t){
-  document.getElementById("status").innerText = t;
+async function del(key) {
+  if(!confirm("Xóa?")) return;
+  await fetch(WORKER+"/api/delete",{
+    method:"POST",
+    headers:auth(),
+    body:JSON.stringify({key})
+  });
+  loadFiles();
+}
+
+async function createFolder() {
+  const name = folderName.value;
+  if(!name) return;
+
+  await fetch(WORKER+"/api/folder",{
+    method:"POST",
+    headers:auth(),
+    body:JSON.stringify({name})
+  });
+
+  folderName.value="";
+  loadFiles();
 }
 </script>
 
