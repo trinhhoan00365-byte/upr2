@@ -2,18 +2,18 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<title>R2 Manager (Stream Upload)</title>
+<title>R2 Manager – Presigned Multipart</title>
 <style>
 body{margin:0;background:#0b1220;font-family:system-ui;color:#fff}
 .container{max-width:900px;margin:40px auto;background:#111c33;padding:20px;border-radius:10px}
 h2{color:#4cc9f0}
 input,button{padding:8px;border-radius:5px;border:none}
 button{background:#2563eb;color:#fff;cursor:pointer}
+.progress{height:10px;background:#1f2937;border-radius:5px;margin-top:10px;overflow:hidden}
+.bar{height:100%;width:0;background:#22c55e}
 table{width:100%;margin-top:15px;border-collapse:collapse}
 td,th{padding:8px;border-bottom:1px solid #333}
 .hidden{display:none}
-.progress{height:10px;background:#1f2937;border-radius:5px;margin-top:10px;overflow:hidden}
-.bar{height:100%;width:0;background:#22c55e}
 </style>
 </head>
 <body>
@@ -26,7 +26,7 @@ td,th{padding:8px;border-bottom:1px solid #333}
 </div>
 
 <div class="container hidden" id="app">
-  <h2>R2 Manager – Stream Upload</h2>
+  <h2>R2 Manager – Presigned Multipart</h2>
 
   <input type="file" id="file">
   <button onclick="upload()">Upload</button>
@@ -34,24 +34,20 @@ td,th{padding:8px;border-bottom:1px solid #333}
   <div class="progress"><div class="bar" id="bar"></div></div>
 
   <table>
-    <thead>
-      <tr><th>File</th><th>Size</th></tr>
-    </thead>
+    <thead><tr><th>File</th><th>Size</th></tr></thead>
     <tbody id="files"></tbody>
   </table>
 </div>
 
 <script>
-const WORKER = "https://upfile4.trinhhoan00365.workers.dev"; // 🔴 sửa domain worker
+const WORKER = "https://upfile4.trinhhoan00365.workers.dev"; // 🔴 đổi
 const TOKEN = "ok";
 
 function login(){
   fetch(WORKER+"/api/login",{
     method:"POST",
     body:JSON.stringify({user:user.value,pass:pass.value})
-  })
-  .then(r=>r.json())
-  .then(d=>{
+  }).then(r=>r.json()).then(d=>{
     if(d.ok){
       loginBox.classList.add("hidden");
       app.classList.remove("hidden");
@@ -64,35 +60,49 @@ async function upload(){
   const f = file.files[0];
   if(!f) return alert("Chọn file");
 
-  const chunkSize = 5 * 1024 * 1024; // 5MB
+  // init
+  const initRes = await fetch(WORKER+"/api/init",{
+    method:"POST",
+    headers:{Authorization:TOKEN},
+    body:JSON.stringify({fileName:f.name})
+  });
+  const init = await initRes.json();
+
+  const key = init.key;
+  const uploadId = init.uploadId;
+
+  const chunkSize = 10 * 1024 * 1024; // 10MB
   const totalParts = Math.ceil(f.size / chunkSize);
-  const uploadId = crypto.randomUUID();
+  const parts = [];
+
+  let uploaded = 0;
 
   for(let i=0;i<totalParts;i++){
     const chunk = f.slice(i*chunkSize,(i+1)*chunkSize);
 
-    await fetch(WORKER+"/api/upload-chunk",{
+    // get signed url
+    const signRes = await fetch(WORKER+"/api/sign-part",{
       method:"POST",
-      headers:{
-        Authorization:TOKEN,
-        "X-Upload-Id":uploadId,
-        "X-Part":i
-      },
-      body:chunk
+      headers:{Authorization:TOKEN},
+      body:JSON.stringify({key, uploadId, partNumber:i+1})
     });
+    const sign = await signRes.json();
 
-    const percent = Math.floor((i+1)/totalParts*100);
-    bar.style.width = percent + "%";
+    // upload to R2 directly
+    const r = await fetch(sign.url,{method:"PUT",body:chunk});
+    const etag = r.headers.get("ETag");
+
+    parts.push({ partNumber:i+1, etag });
+
+    uploaded += chunk.size;
+    bar.style.width = Math.floor(uploaded / f.size * 100) + "%";
   }
 
-  await fetch(WORKER+"/api/complete-upload",{
+  // complete
+  await fetch(WORKER+"/api/complete",{
     method:"POST",
     headers:{Authorization:TOKEN},
-    body:JSON.stringify({
-      uploadId,
-      fileName:f.name,
-      totalParts
-    })
+    body:JSON.stringify({key, uploadId, parts})
   });
 
   bar.style.width="0%";
@@ -104,10 +114,9 @@ function loadFiles(){
   fetch(WORKER+"/api/files",{headers:{Authorization:TOKEN}})
   .then(r=>r.json())
   .then(list=>{
-    const tb = document.getElementById("files");
-    tb.innerHTML="";
+    files.innerHTML="";
     list.forEach(f=>{
-      tb.innerHTML += `
+      files.innerHTML+=`
         <tr>
           <td>${f.key}</td>
           <td>${(f.size/1024/1024).toFixed(2)} MB</td>
