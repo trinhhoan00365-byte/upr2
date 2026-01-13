@@ -11,7 +11,7 @@ progress { width:100%; height:20px }
 </head>
 <body>
 
-<h2>Upload file to lên R2 (4 luồng)</h2>
+<h2>Upload file to vl lên R2 (4 luồng)</h2>
 
 <div class="box">
 <input type="file" id="file"><br><br>
@@ -24,7 +24,7 @@ progress { width:100%; height:20px }
 
 <script>
 const WORKER_URL = "https://upfile4.trinhhoan00365.workers.dev";
-const CHUNK_SIZE = 5 * 1024 * 1024;
+const CHUNK_SIZE = 10 * 1024 * 1024;
 const CONCURRENCY = 4;
 
 async function startUpload() {
@@ -100,3 +100,4 @@ async function startUpload() {
 
 </body>
 </html>
+
