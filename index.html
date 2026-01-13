@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>R2 Parallel Upload</title>
+<title>R2 Parallel Upload Fixed</title>
 <style>
 body { font-family: sans-serif; background:#0f172a; color:white; padding:30px }
 .box { border:2px dashed #3b82f6; padding:40px; text-align:center }
@@ -11,7 +11,7 @@ progress { width:100%; height:20px }
 </head>
 <body>
 
-<h2>Upload file lớn lên R2 (4 luồng song song)</h2>
+<h2>Upload file to lên R2 (4 luồng)</h2>
 
 <div class="box">
 <input type="file" id="file"><br><br>
@@ -31,6 +31,8 @@ async function startUpload() {
   const file = document.getElementById("file").files[0];
   if (!file) return alert("Chọn file");
 
+  document.getElementById("status").innerText = "Đang khởi tạo...";
+
   const init = await fetch(WORKER_URL + "/upload/init", {
     method: "POST",
     body: JSON.stringify({
@@ -40,34 +42,48 @@ async function startUpload() {
   }).then(r => r.json());
 
   const totalParts = Math.ceil(file.size / CHUNK_SIZE);
-  let uploadedBytes = 0;
   const parts = new Array(totalParts);
 
+  let completedParts = 0;
   let nextPart = 1;
 
-  async function worker() {
-    while (true) {
-      const partNumber = nextPart++;
-      if (partNumber > totalParts) break;
+  function updateProgressSafe() {
+    const percent = Math.floor((completedParts / totalParts) * 100);
+    document.getElementById("prog").value = percent;
+    document.getElementById("status").innerText = percent + "%";
+  }
 
+  async function uploadWorker() {
+    while (true) {
+      let partNumber;
+
+      // lock
+      if (nextPart > totalParts) break;
+      partNumber = nextPart++;
+      
       const start = (partNumber - 1) * CHUNK_SIZE;
       const chunk = file.slice(start, start + CHUNK_SIZE);
 
-      const res = await fetch(${WORKER_URL}/upload/part?uploadId=${init.uploadId}&key=${init.key}&partNumber=${partNumber}, {
-        method: "POST",
-        body: chunk
-      }).then(r => r.json());
+      const res = await fetch(
+        `${WORKER_URL}/upload/part?uploadId=${init.uploadId}&key=${init.key}&partNumber=${partNumber}`,
+        { method: "POST", body: chunk }
+      ).then(r => r.json());
 
       parts[partNumber - 1] = { partNumber, etag: res.etag };
 
-      uploadedBytes += chunk.size;
-      updateProgress(uploadedBytes, file.size);
+      completedParts++;
+      updateProgressSafe();
     }
   }
 
   const workers = [];
-  for (let i = 0; i < CONCURRENCY; i++) workers.push(worker());
+  for (let i = 0; i < CONCURRENCY; i++) {
+    workers.push(uploadWorker());
+  }
+
   await Promise.all(workers);
+
+  document.getElementById("status").innerText = "Đang ghép file...";
 
   await fetch(WORKER_URL + "/upload/complete", {
     method: "POST",
@@ -79,12 +95,6 @@ async function startUpload() {
   });
 
   document.getElementById("status").innerText = "✅ Upload thành công!";
-}
-
-function updateProgress(done, total) {
-  const percent = Math.floor(done / total * 100);
-  document.getElementById("prog").value = percent;
-  document.getElementById("status").innerText = percent + "%";
 }
 </script>
 
