@@ -2,36 +2,69 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>R2 Parallel Upload Fixed</title>
+<title>R2 Multi Upload</title>
 <style>
-body { font-family: sans-serif; background:#0f172a; color:white; padding:30px }
-.box { border:2px dashed #3b82f6; padding:40px; text-align:center }
-progress { width:100%; height:20px }
+body { font-family: sans-serif; background:#0f172a; color:white; padding:20px }
+.box { border:2px dashed #3b82f6; padding:30px; text-align:center; margin-bottom:20px }
+.file-item { margin:10px 0; }
+progress { width:100%; height:16px }
 </style>
 </head>
 <body>
 
-<h2>Upload file to vl lên R2 (4 luồng)</h2>
+<h2>Upload nhiều file lên R2 (2 file song song)</h2>
 
 <div class="box">
-<input type="file" id="file"><br><br>
-<button onclick="startUpload()">Upload</button>
+<input type="file" id="files" multiple>
+<br><br>
+<button onclick="startMultiUpload()">Upload</button>
 </div>
 
-<br>
-<progress id="prog" value="0" max="100"></progress>
-<div id="status"></div>
+<div id="list"></div>
 
 <script>
 const WORKER_URL = "https://upfile4.trinhhoan00365.workers.dev";
 const CHUNK_SIZE = 10 * 1024 * 1024;
-const CONCURRENCY = 4;
+const PART_CONCURRENCY = 4;
+const FILE_CONCURRENCY = 2;
 
-async function startUpload() {
-  const file = document.getElementById("file").files[0];
-  if (!file) return alert("Chọn file");
+async function startMultiUpload() {
+  const files = [...document.getElementById("files").files];
+  if (!files.length) return alert("Chọn file");
 
-  document.getElementById("status").innerText = "Đang khởi tạo...";
+  document.getElementById("list").innerHTML = "";
+
+  const queue = files.slice();
+
+  async function runNext() {
+    if (!queue.length) return;
+    const file = queue.shift();
+    await uploadSingleFile(file);
+    await runNext();
+  }
+
+  const workers = [];
+  for (let i = 0; i < FILE_CONCURRENCY; i++) {
+    workers.push(runNext());
+  }
+
+  await Promise.all(workers);
+}
+
+async function uploadSingleFile(file) {
+  const id = Math.random().toString(36).slice(2);
+
+  const div = document.createElement("div");
+  div.className = "file-item";
+  div.innerHTML = `
+    <b>${file.name}</b>
+    <progress id="p-${id}" value="0" max="100"></progress>
+    <div id="s-${id}">Khởi tạo...</div>
+  `;
+  document.getElementById("list").appendChild(div);
+
+  const statusEl = document.getElementById(`s-${id}`);
+  const progEl = document.getElementById(`p-${id}`);
 
   const init = await fetch(WORKER_URL + "/upload/init", {
     method: "POST",
@@ -44,23 +77,20 @@ async function startUpload() {
   const totalParts = Math.ceil(file.size / CHUNK_SIZE);
   const parts = new Array(totalParts);
 
-  let completedParts = 0;
+  let completed = 0;
   let nextPart = 1;
 
-  function updateProgressSafe() {
-    const percent = Math.floor((completedParts / totalParts) * 100);
-    document.getElementById("prog").value = percent;
-    document.getElementById("status").innerText = percent + "%";
+  function updateProgress() {
+    const percent = Math.floor((completed / totalParts) * 100);
+    progEl.value = percent;
+    statusEl.innerText = percent + "%";
   }
 
-  async function uploadWorker() {
+  async function partWorker() {
     while (true) {
-      let partNumber;
-
-      // lock
       if (nextPart > totalParts) break;
-      partNumber = nextPart++;
-      
+      const partNumber = nextPart++;
+
       const start = (partNumber - 1) * CHUNK_SIZE;
       const chunk = file.slice(start, start + CHUNK_SIZE);
 
@@ -71,19 +101,19 @@ async function startUpload() {
 
       parts[partNumber - 1] = { partNumber, etag: res.etag };
 
-      completedParts++;
-      updateProgressSafe();
+      completed++;
+      updateProgress();
     }
   }
 
-  const workers = [];
-  for (let i = 0; i < CONCURRENCY; i++) {
-    workers.push(uploadWorker());
+  const partWorkers = [];
+  for (let i = 0; i < PART_CONCURRENCY; i++) {
+    partWorkers.push(partWorker());
   }
 
-  await Promise.all(workers);
+  await Promise.all(partWorkers);
 
-  document.getElementById("status").innerText = "Đang ghép file...";
+  statusEl.innerText = "Đang ghép file...";
 
   await fetch(WORKER_URL + "/upload/complete", {
     method: "POST",
@@ -94,10 +124,9 @@ async function startUpload() {
     })
   });
 
-  document.getElementById("status").innerText = "✅ Upload thành công!";
+  statusEl.innerText = "✅ Hoàn thành";
 }
 </script>
 
 </body>
 </html>
-
