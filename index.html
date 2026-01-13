@@ -2,130 +2,137 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>R2 Multi Upload</title>
+<title>R2 Manager</title>
 <style>
-body { font-family: sans-serif; background:#0f172a; color:white; padding:20px }
-.box { border:2px dashed #3b82f6; padding:30px; text-align:center; margin-bottom:20px }
-.file-item { margin:10px 0; }
-progress { width:100%; height:16px }
+body { font-family:sans-serif;background:#0f172a;color:white;padding:20px }
+.box{border:2px dashed #3b82f6;padding:20px;margin-bottom:20px}
+.file{display:flex;gap:10px;margin:5px 0;align-items:center}
+button{cursor:pointer}
+progress{width:200px}
 </style>
 </head>
 <body>
 
-<h2>Upload nhiều file lên R2 (2 file song song)</h2>
+<h2>Upload & Quản lý file R2</h2>
 
 <div class="box">
 <input type="file" id="files" multiple>
-<br><br>
 <button onclick="startMultiUpload()">Upload</button>
 </div>
 
-<div id="list"></div>
+<div id="uploads"></div>
+
+<hr>
+
+<h3>File trong bucket</h3>
+<button onclick="loadFiles()">🔄 Refresh</button>
+<div id="fileList"></div>
 
 <script>
 const WORKER_URL = "https://upfile4.trinhhoan00365.workers.dev";
+
 const CHUNK_SIZE = 10 * 1024 * 1024;
 const PART_CONCURRENCY = 4;
 const FILE_CONCURRENCY = 2;
 
+// ================= UPLOAD =================
+
 async function startMultiUpload() {
-  const files = [...document.getElementById("files").files];
-  if (!files.length) return alert("Chọn file");
-
-  document.getElementById("list").innerHTML = "";
-
+  const files = [...filesInput.files];
   const queue = files.slice();
 
-  async function runNext() {
+  async function runner() {
     if (!queue.length) return;
-    const file = queue.shift();
-    await uploadSingleFile(file);
-    await runNext();
+    const f = queue.shift();
+    await uploadFile(f);
+    await runner();
   }
 
-  const workers = [];
-  for (let i = 0; i < FILE_CONCURRENCY; i++) {
-    workers.push(runNext());
-  }
-
-  await Promise.all(workers);
+  for (let i=0;i<FILE_CONCURRENCY;i++) runner();
 }
 
-async function uploadSingleFile(file) {
+async function uploadFile(file) {
   const id = Math.random().toString(36).slice(2);
-
   const div = document.createElement("div");
-  div.className = "file-item";
-  div.innerHTML = `
-    <b>${file.name}</b>
-    <progress id="p-${id}" value="0" max="100"></progress>
-    <div id="s-${id}">Khởi tạo...</div>
-  `;
-  document.getElementById("list").appendChild(div);
+  div.innerHTML = `<b>${file.name}</b> <progress id="p${id}" value=0 max=100></progress> <span id="s${id}">0%</span>`;
+  uploads.appendChild(div);
 
-  const statusEl = document.getElementById(`s-${id}`);
-  const progEl = document.getElementById(`p-${id}`);
+  const init = await fetch(WORKER_URL+"/upload/init",{
+    method:"POST",
+    body:JSON.stringify({fileName:file.name,contentType:file.type})
+  }).then(r=>r.json());
 
-  const init = await fetch(WORKER_URL + "/upload/init", {
-    method: "POST",
-    body: JSON.stringify({
-      fileName: file.name,
-      contentType: file.type
-    })
-  }).then(r => r.json());
+  const totalParts = Math.ceil(file.size/CHUNK_SIZE);
+  const parts = [];
+  let next=1,done=0;
 
-  const totalParts = Math.ceil(file.size / CHUNK_SIZE);
-  const parts = new Array(totalParts);
-
-  let completed = 0;
-  let nextPart = 1;
-
-  function updateProgress() {
-    const percent = Math.floor((completed / totalParts) * 100);
-    progEl.value = percent;
-    statusEl.innerText = percent + "%";
+  function update(){
+    const p=Math.floor(done/totalParts*100);
+    document.getElementById("p"+id).value=p;
+    document.getElementById("s"+id).innerText=p+"%";
   }
 
-  async function partWorker() {
-    while (true) {
-      if (nextPart > totalParts) break;
-      const partNumber = nextPart++;
-
-      const start = (partNumber - 1) * CHUNK_SIZE;
-      const chunk = file.slice(start, start + CHUNK_SIZE);
-
-      const res = await fetch(
-        `${WORKER_URL}/upload/part?uploadId=${init.uploadId}&key=${init.key}&partNumber=${partNumber}`,
-        { method: "POST", body: chunk }
-      ).then(r => r.json());
-
-      parts[partNumber - 1] = { partNumber, etag: res.etag };
-
-      completed++;
-      updateProgress();
+  async function worker(){
+    while(true){
+      if(next>totalParts) break;
+      const n=next++;
+      const chunk=file.slice((n-1)*CHUNK_SIZE,n*CHUNK_SIZE);
+      const r=await fetch(`${WORKER_URL}/upload/part?uploadId=${init.uploadId}&key=${init.key}&partNumber=${n}`,{
+        method:"POST",body:chunk
+      }).then(r=>r.json());
+      parts[n-1]={partNumber:n,etag:r.etag};
+      done++; update();
     }
   }
 
-  const partWorkers = [];
-  for (let i = 0; i < PART_CONCURRENCY; i++) {
-    partWorkers.push(partWorker());
-  }
+  await Promise.all(Array.from({length:PART_CONCURRENCY},worker));
 
-  await Promise.all(partWorkers);
-
-  statusEl.innerText = "Đang ghép file...";
-
-  await fetch(WORKER_URL + "/upload/complete", {
-    method: "POST",
-    body: JSON.stringify({
-      uploadId: init.uploadId,
-      key: init.key,
-      parts
-    })
+  await fetch(WORKER_URL+"/upload/complete",{
+    method:"POST",
+    body:JSON.stringify({uploadId:init.uploadId,key:init.key,parts})
   });
 
-  statusEl.innerText = "✅ Hoàn thành";
+  document.getElementById("s"+id).innerText="✅";
+  loadFiles();
 }
+
+// ================= FILE MANAGER =================
+
+async function loadFiles(){
+  const list=await fetch(WORKER_URL+"/files").then(r=>r.json());
+  fileList.innerHTML="";
+  list.forEach(f=>{
+    const d=document.createElement("div");
+    d.className="file";
+    d.innerHTML=`
+      <span>${f.name} (${(f.size/1024/1024).toFixed(1)} MB)</span>
+      <button onclick="renameFile('${f.name}')">✏️</button>
+      <button onclick="deleteFile('${f.name}')">🗑</button>
+    `;
+    fileList.appendChild(d);
+  });
+}
+
+async function deleteFile(name){
+  if(!confirm("Xoá "+name+" ?")) return;
+  await fetch(WORKER_URL+"/delete",{method:"POST",body:JSON.stringify({name})});
+  loadFiles();
+}
+
+async function renameFile(oldName){
+  const newName=prompt("Tên mới:",oldName);
+  if(!newName||newName===oldName) return;
+  await fetch(WORKER_URL+"/rename",{
+    method:"POST",
+    body:JSON.stringify({oldName,newName})
+  });
+  loadFiles();
+}
+
+const filesInput=document.getElementById("files");
+const uploads=document.getElementById("uploads");
+
+loadFiles();
 </script>
 
 </body>
